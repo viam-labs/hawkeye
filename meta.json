@@ -1,0 +1,20 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:tennis",
+  "visibility": "private",
+  "url": "https://github.com/viam-labs/hawkeye",
+  "description": "...",
+  "models": [
+    {
+      "api": "rdk:service:generic",
+      "model": "viam:tennis:hawkeye"
+    }
+  ],
+  "build": {
+    "build": "make build-module",
+    "path": "bin/module.tar.gz",
+    "arch": ["linux/arm64"]
+  },
+  "entrypoint": "bin/run",
+  "first_run": "setup.sh"
+}
