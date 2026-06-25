@@ -17,8 +17,19 @@ const (
 
 	// The farthest and closest detection areas with which to start moving towards
 	// at high speed and progressively slow down to a stop, respectively.
-	VISION_MIN_DETECTION_AREA visionPixels = 150
-	VISION_MAX_DETECTION_AREA visionPixels = 50_000
+	VISION_MIN_DETECTION_AREA visionPixels = 15_000
+	VISION_MAX_DETECTION_AREA visionPixels = 130_000
+
+	// Accepted labels for tennis ball detections from the ML model.
+	// VISION_BALL_LABEL_NUMERIC is emitted due to a Viam app bug where the class
+	// name is replaced by its numeric index; both are accepted so either model
+	// config works.
+	VISION_BALL_LABEL_NUMERIC = "0"
+	VISION_BALL_LABEL_NAME    = "tennis ball"
+
+	// Minimum confidence score for a detection to be accepted.
+	// Filters low-confidence ML noise. Empirical — tune based on false-positive rate.
+	VISION_MIN_CONFIDENCE = 0.5
 )
 
 type servoDegrees int

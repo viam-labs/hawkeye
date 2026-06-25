@@ -65,11 +65,12 @@ func (h *hawkeye) visionTick(ctx context.Context) {
 		msg, newDetection.area, newDetection.centerX)
 }
 
-// computeLargestDetection returns the detection with the largest bounding-box area,
-// or nil if none have a bounding box.
 func computeLargestDetection(detections []objectdetection.Detection) *visionDetection {
 	var bestDetection *visionDetection
 	for _, d := range detections {
+		if !isBallDetection(d) {
+			continue
+		}
 		box := d.BoundingBox()
 		if box == nil {
 			continue
@@ -87,6 +88,17 @@ func computeLargestDetection(detections []objectdetection.Detection) *visionDete
 	}
 
 	return bestDetection
+}
+
+// isBallDetection reports whether a detection should be treated as a tennis ball.
+// Accepts label "0" (Viam app bug: numeric index instead of class name) and
+// "tennis ball". Rejects anything below VISION_MIN_CONFIDENCE.
+func isBallDetection(d objectdetection.Detection) bool {
+	label := d.Label()
+	if label != VISION_BALL_LABEL_NUMERIC && label != VISION_BALL_LABEL_NAME {
+		return false
+	}
+	return d.Score() >= VISION_MIN_CONFIDENCE
 }
 
 func (h *hawkeye) handleTestVision(_ argsTestVision) (map[string]any, error) {
