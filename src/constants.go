@@ -51,9 +51,12 @@ const (
 	MOTOR_DRIVE_DIRECTION_REVERSE driveDirection = "reverse"
 
 	// Empirical measurements of the servo angle for no/min/max motor power.
-	MOTOR_NEUTRAL      servoDegrees = 90
-	MOTOR_FORWARD_LOW  servoDegrees = 97
-	MOTOR_FORWARD_HIGH servoDegrees = 107
+	MOTOR_NEUTRAL     servoDegrees = 90
+	MOTOR_FORWARD_LOW servoDegrees = 97
+	// Lowered from 107 to tame the top speed while the ML model is being improved.
+	// This is the aggression knob: closer to MOTOR_FORWARD_LOW (97) = gentler. Don't
+	// go below ~98 or the forward band collapses into the ESC deadband floor.
+	MOTOR_FORWARD_HIGH servoDegrees = 101
 	MOTOR_REVERSE_LOW  servoDegrees = 81
 	MOTOR_REVERSE_HIGH servoDegrees = 71
 
@@ -68,6 +71,11 @@ const (
 	MOTOR_REVERSE_NEUTRAL_DURATION = 1500 * time.Millisecond
 
 	TEST_MOTOR_DRIVE_DURATION = 1 * time.Second
+
+	// Duration of the ESC brake pulse applied when transitioning from forward to neutral.
+	// A brief MOTOR_REVERSE_HIGH pulse bleeds momentum without entering reverse mode.
+	// Empirical — tune on the bench; start at 150ms.
+	MOTOR_BRAKE_PULSE_DURATION = 150 * time.Millisecond
 )
 
 const (
@@ -98,4 +106,28 @@ const (
 	// batteryVoltageToPercent.
 	BATTERY_MAX_VOLTAGE = 8.4
 	BATTERY_MIN_VOLTAGE = 6.0
+)
+
+const (
+	// The gripper is a single open/close servo driven by the "grab"/"ungrab"
+	// DoCommand verbs. Unlike the other entries it is not a ticking routine —
+	// grab/ungrab are one-shot servo moves and the servo holds position while
+	// powered — so there is no GRIPPER_TICK_RATE.
+	GRIPPER_NAME = "gripper"
+
+	// Empirical servo angles for the open (released) and closed (grabbing)
+	// positions. Placeholders — calibrate on the bench by jogging the servo and
+	// drop in the real values, the same way the steering/motor angles were tuned.
+	// CLOSED must firmly hold the ball without stalling the servo.
+	GRIPPER_OPEN   servoDegrees = 80
+	GRIPPER_CLOSED servoDegrees = 130
+
+	// Timeout for a single grab/ungrab servo move. Handlers run synchronously
+	// off their own context (DoCommand does not pass one through), mirroring the
+	// test handlers.
+	GRIPPER_MOVE_TIMEOUT = 3 * time.Second
+)
+
+const (
+	FETCH_ROUTINE_NAME = "fetch"
 )

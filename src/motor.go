@@ -26,6 +26,8 @@ func (h *hawkeye) handleStopMotor(_ argsStopMotor) (map[string]any, error) {
 
 // motorTick reads visionLastDetection and drives the motor servo to an angle derived
 // from the detection's area, resetting to neutral when no detection is present.
+// When transitioning from forward to neutral, a brief brake pulse is applied first
+// to bleed forward momentum before coasting to a stop.
 func (h *hawkeye) motorTick(ctx context.Context) {
 	lastDetection := h.visionLastDetection.Load()
 	if lastDetection == nil {
@@ -43,11 +45,25 @@ func (h *hawkeye) motorTick(ctx context.Context) {
 		return
 	}
 
+	prevDirection := h.motorLastDriveDirection
 	motorAngle := h.convertAreaToMotorServoAngleAndSetLastDriveDirection(lastDetection.area)
 
 	if motorAngle == h.motorLastAngle {
 		h.motorThrottledLogger.Infof("no change in motor servo angle %d; skipping move", motorAngle)
 		return
+	}
+
+	if brakePulseNeeded(motorAngle, prevDirection) {
+		h.motorThrottledLogger.Info("applying brake pulse before neutral")
+		if err := h.motorServoViam.Move(ctx, uint32(MOTOR_REVERSE_HIGH), nil); err != nil {
+			if errors.Is(err, context.Canceled) {
+				h.motorLogger.Info("stopping due to context cancellation")
+				return
+			}
+			h.motorThrottledLogger.Warnf("error applying brake pulse: %v", err)
+		} else {
+			time.Sleep(MOTOR_BRAKE_PULSE_DURATION)
+		}
 	}
 
 	err := h.motorServoViam.Move(ctx, uint32(motorAngle), nil)
@@ -149,4 +165,12 @@ func (h *hawkeye) motorNeutral() {
 	if err := h.motorServoViam.Move(ctx, uint32(MOTOR_NEUTRAL), nil); err != nil {
 		h.motorLogger.Warnf("failed to return motor to neutral: %v", err)
 	}
+}
+
+// brakePulseNeeded reports whether a brake pulse should fire before moving to
+// neutral — only when leaving forward drive. The ESC interprets MOTOR_REVERSE_HIGH
+// as a brake signal (not reverse) when transitioning from forward, so a brief pulse
+// bleeds momentum without engaging the reverse arming sequence.
+func brakePulseNeeded(newAngle servoDegrees, prevDirection driveDirection) bool {
+	return newAngle == MOTOR_NEUTRAL && prevDirection == MOTOR_DRIVE_DIRECTION_FORWARD
 }

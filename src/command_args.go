@@ -129,6 +129,16 @@ func (args *argsTestScreen) validateArgs() error {
 	return nil
 }
 
+// Gripper
+
+type argsGrabGripper struct{}
+
+func (*argsGrabGripper) validateArgs() error { return nil }
+
+type argsUngrabGripper struct{}
+
+func (*argsUngrabGripper) validateArgs() error { return nil }
+
 // Battery
 
 type argsStartBattery struct{}
@@ -153,3 +163,13 @@ func (args *argsTestBattery) validateArgs() error {
 
 	return nil
 }
+
+// Fetch
+
+type argsStartFetch struct{}
+
+func (*argsStartFetch) validateArgs() error { return nil }
+
+type argsStopFetch struct{}
+
+func (*argsStopFetch) validateArgs() error { return nil }
