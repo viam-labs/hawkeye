@@ -13,12 +13,14 @@ const (
 
 	// Corresponds to the width of the camera's resolution as defined in the Viam config.
 	VISION_MIN_X visionPixels = 0
-	VISION_MAX_X visionPixels = 640
+	VISION_MAX_X visionPixels = 1920
 
 	// The farthest and closest detection areas with which to start moving towards
 	// at high speed and progressively slow down to a stop, respectively.
-	VISION_MIN_DETECTION_AREA visionPixels = 15_000
-	VISION_MAX_DETECTION_AREA visionPixels = 130_000
+	// Scaled ~9x from 640-wide values (1920x1080 = 3x each dimension → 9x area).
+	// Re-tune on hardware — these are empirical starting points.
+	VISION_MIN_DETECTION_AREA visionPixels = 135_000
+	VISION_MAX_DETECTION_AREA visionPixels = 1_170_000
 
 	// Accepted labels for tennis ball detections from the ML model.
 	// VISION_BALL_LABEL_NUMERIC is emitted due to a Viam app bug where the class
