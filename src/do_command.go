@@ -46,12 +46,6 @@ func (h *hawkeye) DoCommand(_ context.Context, command map[string]any) (map[stri
 			return nil, fmt.Errorf(`"test" requires exactly one routine, but got %d`, len(input.RoutinesAndArgs))
 		}
 		return doDispatch(input.RoutinesAndArgs, h.dispatchTest)
-	case "grab":
-		// The gripper is a single component with one-shot actions, not a routine,
-		// so grab/ungrab dispatch directly rather than through the routines map.
-		return runHandler(input.RoutinesAndArgs, h.handleGrabGripper)
-	case "ungrab":
-		return runHandler(input.RoutinesAndArgs, h.handleUngrabGripper)
 	default:
 		return nil, errors.Errorf("unknown command %q", input.Command)
 	}
@@ -139,6 +133,10 @@ func (h *hawkeye) dispatchTest(routineName string, commandArgs any) (map[string]
 		return runHandler(commandArgs, h.handleTestScreen)
 	case BATTERY_ROUTINE_NAME:
 		return runHandler(commandArgs, h.handleTestBattery)
+	case TRACKING_ROUTINE_NAME:
+		return runHandler(commandArgs, h.handleTestTracking)
+	case BRAKING_ROUTINE_NAME:
+		return runHandler(commandArgs, h.handleTestBraking)
 	default:
 		return nil, errors.Errorf("unknown routine %q for test", routineName)
 	}

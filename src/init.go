@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"image"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,6 +49,8 @@ type hawkeye struct {
 
 	cameraName            string
 	visionViam            vision.Service
+	visionColorViam       vision.Service // optional; wired when Config.VisionColor is set
+	visionMode            string         // "ml", "color", or "hybrid"; set at start time
 	visionRoutine         *util.Routine
 	visionLogger          logging.Logger
 	visionThrottledLogger *util.ThrottledLogger
@@ -60,6 +63,8 @@ type hawkeye struct {
 	steeringLogger          logging.Logger
 	steeringThrottledLogger *util.ThrottledLogger
 	steeringLastAngle       servoDegrees
+	steeringPrevError       float64
+	steeringPrevAt          time.Time
 
 	// Motor
 
@@ -93,6 +98,18 @@ type hawkeye struct {
 	batteryLogger      logging.Logger
 	batteryDev         *ina219.Dev
 	batteryLastReading atomic.Pointer[batteryReading]
+
+	// Fetch (state written only by fetchVisionTick — no sync needed)
+
+	fetchLogger             logging.Logger
+	fetchThrottledLogger    *util.ThrottledLogger
+	fetchState              string           // "acquiring", "tracking", "reacquiring", or "done"
+	fetchLockZone           *image.Rectangle // ML bbox + margin; nil until first acquisition
+	fetchColorMisses        int              // consecutive color misses inside lock zone
+	fetchCorrectionAttempts int              // reverse-and-retry attempts since the last ML acquire
+	fetchAcquireStreakStart time.Time        // when the current continuous ML detection streak began; zero if none
+	fetchStallCheckAt       time.Time        // when the current stall-detection window started; zero if none
+	fetchStallCheckArea     visionPixels     // ball area recorded at fetchStallCheckAt
 }
 
 func newHawkeye(
@@ -107,11 +124,13 @@ func newHawkeye(
 		motorLogger    = mainLogger.Sublogger(MOTOR_ROUTINE_NAME)
 		screenLogger   = mainLogger.Sublogger(SCREEN_ROUTINE_NAME)
 		batteryLogger  = mainLogger.Sublogger(BATTERY_ROUTINE_NAME)
+		fetchLogger    = mainLogger.Sublogger(FETCH_ROUTINE_NAME)
 
 		visionThrottledLogger   = util.NewThrottledLogger(visionLogger, util.LOG_EVERY_5_SECS)
 		steeringThrottledLogger = util.NewThrottledLogger(steeringLogger, util.LOG_EVERY_5_SECS)
 		motorThrottledLogger    = util.NewThrottledLogger(motorLogger, util.LOG_EVERY_5_SECS)
 		screenThrottledLogger   = util.NewThrottledLogger(screenLogger, util.LOG_EVERY_10_SECS)
+		fetchThrottledLogger    = util.NewThrottledLogger(fetchLogger, util.LOG_EVERY_5_SECS)
 	)
 
 	// Screen and battery share the I2C bus; both are non-essential so the module
@@ -147,6 +166,10 @@ func newHawkeye(
 		batteryRoutine: util.NewRoutineInstance(BATTERY_ROUTINE_NAME),
 		batteryLogger:  batteryLogger,
 		batteryDev:     batteryDev,
+		// Fetch
+		fetchLogger:          fetchLogger,
+		fetchThrottledLogger: fetchThrottledLogger,
+		fetchState:           "acquiring",
 	}
 
 	if err := h.Reconfigure(ctx, deps, conf); err != nil {
@@ -233,6 +256,18 @@ func (h *hawkeye) Reconfigure(ctx context.Context, deps resource.Dependencies, c
 	h.steeringServoViam = servoSteeringDep
 	h.motorServoViam = servoMotorDep
 
+	// VisionColor is optional. If configured but unavailable, log and continue —
+	// "color" and "hybrid" modes will fall back to the ML detector.
+	h.visionColorViam = nil
+	if cfg.VisionColor != "" {
+		colorDep, colorErr := vision.FromProvider(deps, cfg.VisionColor)
+		if colorErr != nil {
+			h.visionLogger.Errorf("configured vision_color %q is unavailable; color/hybrid mode will fall back to ML: %v", cfg.VisionColor, colorErr)
+		} else {
+			h.visionColorViam = colorDep
+		}
+	}
+
 	return nil
 }
 
@@ -245,22 +280,37 @@ func (h *hawkeye) Close(ctx context.Context) error {
 	return nil
 }
 
-// Config is the hawkeye's Viam config with dependencies.
+// Config is the hawkeye's Viam config with dependencies. VisionColor is optional;
+// all other dependencies are required.
 type Config struct {
 	Camera        string `json:"camera"`
 	Vision        string `json:"vision"`
+	VisionColor   string `json:"vision_color"` // optional: color detector service for "color"/"hybrid" mode
 	ServoSteering string `json:"servo_steering"`
 	ServoMotor    string `json:"servo_motor"`
 }
 
-// Validate checks required fields and declares implicit dependencies.
+// Validate checks required fields and declares implicit dependencies. The
+// gripper is optional (for now), so the config is validated field-by-field rather than
+// with EnsureAllStructFieldsAreSet (which would force every field to be set).
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
-	if err := util.EnsureAllStructFieldsAreSet(*cfg); err != nil {
-		return nil, nil, errors.Wrapf(err, "%s: missing attribute in Viam config", path)
+	for _, dep := range []struct{ attr, name string }{
+		{"camera", cfg.Camera},
+		{"vision", cfg.Vision},
+		{"servo_steering", cfg.ServoSteering},
+		{"servo_motor", cfg.ServoMotor},
+	} {
+		if dep.name == "" {
+			return nil, nil, errors.Errorf("%s: missing required attribute %q in Viam config", path, dep.attr)
+		}
 	}
 
 	requiredDeps := []string{cfg.Camera, cfg.Vision, cfg.ServoSteering, cfg.ServoMotor}
-	optionalDeps := []string{}
+
+	var optionalDeps []string
+	if cfg.VisionColor != "" {
+		optionalDeps = append(optionalDeps, cfg.VisionColor)
+	}
 
 	return requiredDeps, optionalDeps, nil
 }

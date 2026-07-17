@@ -21,6 +21,8 @@ func (h *hawkeye) handleStopMotor(_ argsStopMotor) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	h.motorNeutral()
+	h.motorLastAngle = MOTOR_NEUTRAL
 	return map[string]any{"status": "stopped"}, nil
 }
 
@@ -40,6 +42,8 @@ func (h *hawkeye) motorTick(ctx context.Context) {
 		err := h.motorServoViam.Move(ctx, uint32(MOTOR_NEUTRAL), nil)
 		if err != nil {
 			h.motorThrottledLogger.Warnf("error resetting motor servo to neutral angle %d: %v", MOTOR_NEUTRAL, err)
+		} else {
+			h.motorLastAngle = MOTOR_NEUTRAL
 		}
 
 		return
@@ -126,15 +130,10 @@ func (h *hawkeye) handleTestMotor(args argsTestMotor) (map[string]any, error) {
 
 	h.motorLogger.Infof("doing %s motor drive with angle %d (prior=%s)", args.Direction, angle, h.motorLastDriveDirection)
 
-	if args.Direction == string(MOTOR_DRIVE_DIRECTION_REVERSE) && h.motorLastDriveDirection == MOTOR_DRIVE_DIRECTION_FORWARD {
-		if err := h.motorServoViam.Move(ctx, uint32(MOTOR_REVERSE_HIGH), nil); err != nil {
-			return nil, errors.Wrap(err, "error brake tapping motor using MOTOR_REVERSE_HIGH")
+	if motorNeedsArmReverse(args.Direction, h.motorLastDriveDirection) {
+		if err := h.motorArmReverse(ctx); err != nil {
+			return nil, err
 		}
-		time.Sleep(MOTOR_REVERSE_BRAKE_DURATION)
-		if err := h.motorServoViam.Move(ctx, uint32(MOTOR_NEUTRAL), nil); err != nil {
-			return nil, errors.Wrap(err, "error settling motor in neutral using MOTOR_NEUTRAL")
-		}
-		time.Sleep(MOTOR_REVERSE_NEUTRAL_DURATION)
 	}
 
 	if err := h.motorServoViam.Move(ctx, uint32(angle), nil); err != nil {
@@ -149,6 +148,19 @@ func (h *hawkeye) handleTestMotor(args argsTestMotor) (map[string]any, error) {
 	}
 
 	return map[string]any{"status": "ok"}, nil
+}
+
+// Preperation for reversing on retry
+func (h *hawkeye) motorArmReverse(ctx context.Context) error {
+	if err := h.motorServoViam.Move(ctx, uint32(MOTOR_REVERSE_HIGH), nil); err != nil {
+		return errors.Wrap(err, "error brake tapping motor using MOTOR_REVERSE_HIGH")
+	}
+	time.Sleep(MOTOR_REVERSE_BRAKE_DURATION)
+	if err := h.motorServoViam.Move(ctx, uint32(MOTOR_NEUTRAL), nil); err != nil {
+		return errors.Wrap(err, "error settling motor in neutral using MOTOR_NEUTRAL")
+	}
+	time.Sleep(MOTOR_REVERSE_NEUTRAL_DURATION)
+	return nil
 }
 
 // powerToAngle linearly maps power in [1, 10] to an angle in [low, high].
@@ -173,4 +185,26 @@ func (h *hawkeye) motorNeutral() {
 // bleeds momentum without engaging the reverse arming sequence.
 func brakePulseNeeded(newAngle servoDegrees, prevDirection driveDirection) bool {
 	return newAngle == MOTOR_NEUTRAL && prevDirection == MOTOR_DRIVE_DIRECTION_FORWARD
+}
+
+// motorBrakeThenNeutral moves to neutral, after a small conditional brake pulse
+func (h *hawkeye) motorBrakeThenNeutral() {
+	if brakePulseNeeded(MOTOR_NEUTRAL, h.motorLastDriveDirection) {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		if err := h.motorServoViam.Move(ctx, uint32(MOTOR_REVERSE_HIGH), nil); err != nil {
+			h.motorLogger.Warnf("error applying brake pulse before neutral: %v", err)
+		} else {
+			time.Sleep(MOTOR_BRAKE_PULSE_DURATION)
+		}
+		cancel()
+	}
+
+	h.motorNeutral()
+	h.motorLastAngle = MOTOR_NEUTRAL
+	h.motorLastDriveDirection = MOTOR_DRIVE_DIRECTION_NEUTRAL
+}
+
+// Bot is trying to reverse
+func motorNeedsArmReverse(requestedDirection string, prevDirection driveDirection) bool {
+	return requestedDirection == string(MOTOR_DRIVE_DIRECTION_REVERSE) && prevDirection == MOTOR_DRIVE_DIRECTION_FORWARD
 }

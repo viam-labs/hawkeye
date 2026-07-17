@@ -24,15 +24,16 @@ For Viam developers: the machine configuration is defined under [`viam-dev/Evgen
 
 ### Architecture
 
-Hawkeye is organized around **routines** — independent units of behavior that each own a hardware component. There are five of them:
+Hawkeye is organized around **routines** — independent units of behavior that each own a hardware component. There are six of them:
 
-| Routine    | Hardware             | What it does                                                                           |
-| ---------- | -------------------- | -------------------------------------------------------------------------------------- |
-| `vision`   | Camera               | Asks the Viam vision service for tennis-ball detections and publishes the largest one. |
-| `steering` | Steering servo       | Centers the steering on the latest detection's pixel-X.                                |
-| `motor`    | ESC (as a servo)     | Drives the motor at a speed derived from the detection's bounding-box area.            |
-| `screen`   | SSD1306 OLED         | Redraws the OLED with battery voltage, a rolling tennis ball, or the Viam logo.        |
-| `battery`  | INA219 power monitor | Reads battery voltage on a tick so other routines (like `screen`) can display it.      |
+| Routine    | Hardware             | What it does                                                                                           |
+| ---------- | -------------------- | ------------------------------------------------------------------------------------------------------ |
+| `vision`   | Camera               | Asks the Viam vision service for tennis-ball detections and publishes the largest one.                 |
+| `steering` | Steering servo       | Centers the steering on the latest detection's pixel-X.                                                |
+| `motor`    | ESC (as a servo)     | Drives the motor at a speed derived from the detection's bounding-box area.                            |
+| `screen`   | SSD1306 OLED         | Redraws the OLED with battery voltage, a rolling tennis ball, or the Viam logo.                        |
+| `battery`  | INA219 power monitor | Reads battery voltage on a tick so other routines (like `screen`) can display it.                      |
+| `fetch`    | Camera + servos      | Composite routine: ML acquires ball → color detector tracks within lock zone → motor stops when close. |
 
 Each routine runs its tick function on a fixed cadence via [`util.Routine`](util/routine.go) and is independently startable, stoppable, and testable. The naming convention is load-bearing: every routine-specific identifier in [src/](src/) starts with the routine name, so `grep vision src/` shows the full surface area of the vision routine in one pass.
 
@@ -87,16 +88,29 @@ Make sure the wheels are suspended in the air or that you have ample space.
 
 ℹ️ Per-routine argument shapes and their defaults & validation rules live in src/command_args.go.
 
-// Start the full autonomous tracking loop: vision detects, steering centers on the ball,
-// motor drives toward it, screen shows the rolling tennis ball animation.
+// Start the fetch routine: ML acquires ball → color detector tracks within lock zone →
+// motor stops at FETCH_STOP_AREA. Requires vision_color to be configured for full
+// ML+color hybrid tracking; falls back to ML-only if vision_color is absent.
+{ "command": "start", "routines": { "fetch": {} } }
+{ "command": "stop",  "routines": { "fetch": {} } }
+
+// Start the full autonomous tracking loop without fetch (vision detects, steering centers,
+// motor drives). Use this to run ML-only or standalone color vision modes.
+// For hybrid ML+color tracking, use the fetch routine instead.
 { "command": "start", "routines": { "vision": {}, "steering": {}, "motor": {}, "screen": {} } }
+{ "command": "start", "routines": { "vision": { "mode": "color" }, "steering": {}, "motor": {} } }
 
-// Less functionality: vision detects, steering centers on the tennis ball,
-// screen shows the rolling tennis ball animation. No motor.
-{ "command": "start", "routines": { "vision": {}, "steering": {}, "screen": {} } }
-
-// Stop everything and let the steering servo recenter.
+// Stop everything.
 { "command": "stop", "routines": { "vision": {}, "steering": {}, "motor": {}, "screen": {} } }
+
+// Spot-check a single detection call from ML or color detector.
+{ "command": "test", "routines": { "vision": { "mode": "ml" } } }
+{ "command": "test", "routines": { "vision": { "mode": "color" } } }
+
+// Live tracking performance test: runs vision+steering loop for duration_secs seconds
+// and returns aggregate latency, Hz, detection rate, and average bounding box area.
+{ "command": "test", "routines": { "tracking": { "mode": "ml",    "duration_secs": 15 } } }
+{ "command": "test", "routines": { "tracking": { "mode": "color", "duration_secs": 15 } } }
 
 // Drive the motor forward at 30% power for 2 seconds without involving vision.
 { "command": "test", "routines": { "motor": { "direction": "forward", "power": 3, "duration_secs": 2 } } }
@@ -114,14 +128,26 @@ Make sure the wheels are suspended in the air or that you have ample space.
 
 ### Viam dependencies
 
-The module declares four required dependencies in its Viam config:
+The module declares four required dependencies and one optional dependency in its Viam config:
 
-| Field            | Viam component         | Purpose                               |
-| ---------------- | ---------------------- | ------------------------------------- |
-| `camera`         | `rdk:component:camera` | Source frames for the vision service. |
-| `vision`         | `rdk:service:vision`   | Tennis ball detector.                 |
-| `servo_steering` | `rdk:component:servo`  | Steering servo.                       |
-| `servo_motor`    | `rdk:component:servo`  | ESC, configured as a servo.           |
+| Field          | Viam component       | Required | Purpose                                                                                                |
+| -------------- | -------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `camera`         | `rdk:component:camera` | ✓      | Source frames for the vision service.                                                                  |
+| `vision`         | `rdk:service:vision`   | ✓      | ML tennis ball detector (YOLO or similar).                                                             |
+| `vision_color`   | `rdk:service:vision`   |         | _Optional._ Color detector for fetch lock-zone tracking. Without it, fetch falls back to ML-only.     |
+| `servo_steering` | `rdk:component:servo`  | ✓      | Steering servo.                                                                                        |
+| `servo_motor`    | `rdk:component:servo`  | ✓      | ESC, configured as a servo.                                                                            |
+
+### Fetch routine — tunable constants
+
+All constants live in [src/constants.go](src/constants.go). The ones most likely to need hardware calibration:
+
+| Constant                   | Default   | What it controls                                                              |
+| -------------------------- | --------- | ----------------------------------------------------------------------------- |
+| `FETCH_LOCK_ZONE_MARGIN_PX` | `150`    | Pixels added to each side of the ML bbox to form the color-detector search region. Increase if color loses the ball between ML ticks. |
+| `FETCH_COLOR_MISS_THRESHOLD` | `5`     | Consecutive color-detector misses before ML re-acquisition. Increase for more occlusion tolerance. |
+| `FETCH_STOP_AREA`           | `130_000` | Detection area (px²) at which the motor halts. Increase to stop further away. |
+| `VISION_MIN_DETECTION_AREA` | `15_000`  | Minimum area for the motor to start driving. Increase to ignore distant noise. |
 
 Validation and reconfiguration behavior for these dependencies lives in [src/init.go](src/init.go). The matching robot-config snippet — the `services` and `modules` entries that declare these names — lives in the comment block in [Makefile](Makefile).
 

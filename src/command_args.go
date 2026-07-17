@@ -12,17 +12,41 @@ type commandArgs[T any] interface {
 
 // Vision
 
-type argsStartVision struct{}
+type argsStartVision struct {
+	Mode string `mapstructure:"mode"` // optional: "ml" (default) or "color"; hybrid tracking → use fetch instead
+}
 
-func (*argsStartVision) validateArgs() error { return nil }
+func (args *argsStartVision) validateArgs() error {
+	if args.Mode == "" {
+		args.Mode = VISION_MODE_ML
+	}
+	switch args.Mode {
+	case VISION_MODE_ML, VISION_MODE_COLOR:
+	default:
+		return errors.Errorf("vision mode must be %q or %q (for hybrid tracking use the fetch routine)", VISION_MODE_ML, VISION_MODE_COLOR)
+	}
+	return nil
+}
 
 type argsStopVision struct{}
 
 func (*argsStopVision) validateArgs() error { return nil }
 
-type argsTestVision struct{}
+type argsTestVision struct {
+	Mode string `mapstructure:"mode"` // optional: "ml" (default) or "color"
+}
 
-func (*argsTestVision) validateArgs() error { return nil }
+func (args *argsTestVision) validateArgs() error {
+	if args.Mode == "" {
+		args.Mode = VISION_MODE_ML
+	}
+	switch args.Mode {
+	case VISION_MODE_ML, VISION_MODE_COLOR:
+	default:
+		return errors.Errorf("test vision mode must be %q or %q", VISION_MODE_ML, VISION_MODE_COLOR)
+	}
+	return nil
+}
 
 // Steering
 
@@ -129,16 +153,6 @@ func (args *argsTestScreen) validateArgs() error {
 	return nil
 }
 
-// Gripper
-
-type argsGrabGripper struct{}
-
-func (*argsGrabGripper) validateArgs() error { return nil }
-
-type argsUngrabGripper struct{}
-
-func (*argsUngrabGripper) validateArgs() error { return nil }
-
 // Battery
 
 type argsStartBattery struct{}
@@ -173,3 +187,48 @@ func (*argsStartFetch) validateArgs() error { return nil }
 type argsStopFetch struct{}
 
 func (*argsStopFetch) validateArgs() error { return nil }
+
+// Tracking (test-only: no argsStart/argsStop — handleTestTracking blocks for duration_secs)
+
+type argsTestTracking struct {
+	Mode         string  `mapstructure:"mode"`          // optional: "ml" (default) or "color"
+	DurationSecs float64 `mapstructure:"duration_secs"` // optional: seconds to run (default: 10, max: 120)
+}
+
+func (args *argsTestTracking) validateArgs() error {
+	if args.Mode == "" {
+		args.Mode = VISION_MODE_ML
+	}
+	switch args.Mode {
+	case VISION_MODE_ML, VISION_MODE_COLOR:
+	default:
+		return errors.Errorf("tracking mode must be %q or %q", VISION_MODE_ML, VISION_MODE_COLOR)
+	}
+
+	if args.DurationSecs == 0 {
+		args.DurationSecs = TEST_TRACKING_DEFAULT_DURATION_SECS
+	}
+	if args.DurationSecs < 1 || args.DurationSecs > TEST_TRACKING_MAX_DURATION_SECS {
+		return errors.Errorf("duration_secs must be between 1 and %d", TEST_TRACKING_MAX_DURATION_SECS)
+	}
+
+	return nil
+}
+
+// Braking (test-only: no argsStart/argsStop — handleTestBraking blocks for
+// 2 * duration_secs per power phase)
+
+type argsTestBraking struct {
+	DurationSecs float64 `mapstructure:"duration_secs"` // optional: seconds to hold each forward/reverse phase (default: 2, max: 5)
+}
+
+func (args *argsTestBraking) validateArgs() error {
+	if args.DurationSecs == 0 {
+		args.DurationSecs = TEST_BRAKING_DEFAULT_DURATION_SECS
+	}
+	if args.DurationSecs < 1 || args.DurationSecs > TEST_BRAKING_MAX_DURATION_SECS {
+		return errors.Errorf("duration_secs must be between 1 and %d", TEST_BRAKING_MAX_DURATION_SECS)
+	}
+
+	return nil
+}

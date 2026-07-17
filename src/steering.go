@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/pkg/errors"
@@ -32,55 +33,77 @@ func (h *hawkeye) handleStopSteering(_ argsStopSteering) (map[string]any, error)
 	return map[string]any{"status": "stopped"}, nil
 }
 
-// steeringTick reads visionLastDetection and moves the steering servo to an angle
-// derived from the detection's centerX, resetting to neutral when no detection is present.
+// steeringTick reads visionLastDetection and drives the steering servo via a PD
+// controller. Error = (centerX − frameCenter) in pixels; positive means the ball
+// is right of center, which requires a lower servo angle to steer right.
 func (h *hawkeye) steeringTick(ctx context.Context) {
 	lastDetection := h.visionLastDetection.Load()
 
 	if lastDetection == nil {
+		// Reset PD state so a stale error doesn't bias the next acquisition.
+		h.steeringPrevError = 0
+		h.steeringPrevAt = time.Time{}
+
 		if h.steeringLastAngle == STEERING_NEUTRAL {
-			h.steeringThrottledLogger.Info("found no vision detection to move steering servo; already at neutral angle %d", STEERING_NEUTRAL)
+			h.steeringThrottledLogger.Infof("found no vision detection to move steering servo; already at neutral angle %d", STEERING_NEUTRAL)
 			return
 		}
 
-		err := h.steeringServoViam.Move(ctx, uint32(STEERING_NEUTRAL), nil)
-		if err != nil {
+		if err := h.steeringServoViam.Move(ctx, uint32(STEERING_NEUTRAL), nil); err != nil {
 			h.steeringLogger.Warnf("error resetting steering servo back to neutral angle %d after no detection: %v", STEERING_NEUTRAL, err)
 			return
 		}
 
 		h.steeringLastAngle = STEERING_NEUTRAL
 		h.steeringThrottledLogger.Infof("found no vision detection to move steering servo; reset back to neutral angle %d", STEERING_NEUTRAL)
-
 		return
 	}
 
-	centerAngle := convertXToSteeringServoAngle(lastDetection.centerX)
+	now := time.Now()
+	dt := STEERING_TICK_RATE.Seconds()
+	if !h.steeringPrevAt.IsZero() {
+		dt = now.Sub(h.steeringPrevAt).Seconds()
+	}
+	h.steeringPrevAt = now
+
+	pidErr := float64(lastDetection.centerX) - VISION_FRAME_CENTER_X
+
+	p := STEERING_KP * pidErr
+
+	d := 0.0
+	if dt > 0 {
+		d = STEERING_KD * (pidErr - h.steeringPrevError) / dt
+	}
+	h.steeringPrevError = pidErr
+
+	output := p + d
+	raw := float64(STEERING_NEUTRAL) - output
+	clamped := math.Max(float64(STEERING_MAX_RIGHT), math.Min(float64(STEERING_MAX_LEFT), raw))
+	centerAngle := servoDegrees(clamped + 0.5)
+
+	h.steeringThrottledLogger.Infof("PD: err=%.1f p=%.2f d=%.2f → angle=%d", pidErr, p, d, centerAngle)
 
 	if centerAngle == h.steeringLastAngle {
 		h.steeringThrottledLogger.Infof("no change in steering servo angle %d; skipping move", centerAngle)
 		return
 	}
 
-	err := h.steeringServoViam.Move(ctx, uint32(centerAngle), nil)
-	if err != nil {
+	if err := h.steeringServoViam.Move(ctx, uint32(centerAngle), nil); err != nil {
 		if errors.Is(err, context.Canceled) {
 			h.steeringLogger.Info("stopping due to context cancellation")
 			return
 		}
-
 		h.steeringLogger.Warnf("error moving steering servo to angle %d: %s", centerAngle, err)
 		time.Sleep(10 * time.Millisecond)
 		return
 	}
 
 	h.steeringLastAngle = centerAngle
-	h.steeringThrottledLogger.Infof("moved steering servo to angle %d", centerAngle)
 }
 
-// convertXToSteeringServoAngle linearly maps a pixel-X in [VISION_MIN_X, VISION_MAX_X]
-// to a servo angle in [STEERING_MAX_LEFT, STEERING_MAX_RIGHT]. Inputs outside the vision
-// range are clamped to the corresponding servo extreme.
+// convertXToSteeringServoAngle linearly maps a pixel-X to a servo angle.
+// Used by the tracking test routine for display/metric purposes only — actual
+// autonomous steering uses the PID controller in steeringTick.
 func convertXToSteeringServoAngle(x visionPixels) servoDegrees {
 	if x <= VISION_MIN_X {
 		return STEERING_MAX_LEFT
@@ -114,7 +137,7 @@ func (h *hawkeye) handleTestSteering(_ argsTestSteering) (map[string]any, error)
 	time.Sleep(1 * time.Second)
 
 	h.steeringLogger.Infof("moving steering servo to neutral (angle: %d)", STEERING_NEUTRAL)
-	err = h.steeringServoViam.Move(ctx, uint32(STEERING_MAX_RIGHT), nil)
+	err = h.steeringServoViam.Move(ctx, uint32(STEERING_NEUTRAL), nil)
 	if err != nil {
 		h.steeringLogger.Warnf("error moving steering servo to neutral (angle: %d): %v", STEERING_NEUTRAL, err)
 	}
