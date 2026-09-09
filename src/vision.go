@@ -127,7 +127,15 @@ func (h *hawkeye) visionTick(ctx context.Context) {
 		var capture viscapture.VisCapture
 		capture, err = visionViam.CaptureAllFromCamera(ctx, h.cameraName,
 			viscapture.CaptureOptions{ReturnImage: true, ReturnDetections: true}, nil)
-		detections, frame = capture.Detections, capture.Image
+		detections = capture.Detections
+		if capture.Image != nil {
+			frame, err = capture.Image.Image(ctx)
+			if err != nil {
+				h.visionThrottledLogger.Warnf("error decoding captured image: %v", err)
+				frame = nil
+				err = nil
+			}
+		}
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
