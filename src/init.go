@@ -244,7 +244,6 @@ func initI2CBusWithBatteryAndScreenDev(
 	screenDev, err := ssd1306.NewI2C(i2cBus, &ssd1306.Opts{
 		W:          SCREEN_WIDTH,
 		H:          SCREEN_HEIGHT,
-		Rotated:    false,
 		Sequential: true,
 	})
 	if err != nil {
@@ -256,7 +255,7 @@ func initI2CBusWithBatteryAndScreenDev(
 }
 
 func (h *hawkeye) Reconfigure(ctx context.Context, deps resource.Dependencies, c resource.Config) error {
-	h.Close(ctx)
+	_ = h.Close(ctx)
 
 	cfg, err := resource.NativeConfig[*Config](c)
 	if err != nil {
