@@ -197,7 +197,7 @@ func (h *hawkeye) visionRecordFrame(recordDir string, frame image.Image, detecti
 		h.visionThrottledLogger.Warnf("error creating frame %q: %v", path, err)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if err := jpeg.Encode(file, annotated, &jpeg.Options{Quality: 80}); err != nil {
 		h.visionThrottledLogger.Warnf("error encoding frame %q: %v", path, err)
