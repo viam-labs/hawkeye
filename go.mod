@@ -6,7 +6,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/pkg/errors v0.9.1
 	go.uber.org/multierr v1.11.0
-	go.viam.com/rdk v1.14.0
+	go.viam.com/rdk v1.15.0
 	golang.org/x/image v0.41.0
 	periph.io/x/conn/v3 v3.7.2
 	periph.io/x/devices/v3 v3.7.4
@@ -85,7 +85,7 @@ require (
 	github.com/fullstorydev/grpcurl v1.8.6 // indirect
 	github.com/gen2brain/malgo v0.11.26 // indirect
 	github.com/go-gl/mathgl v1.0.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
