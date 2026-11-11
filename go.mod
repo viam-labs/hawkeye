@@ -6,7 +6,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/pkg/errors v0.9.1
 	go.uber.org/multierr v1.11.0
-	go.viam.com/rdk v1.15.0
+	go.viam.com/rdk v1.16.0
 	golang.org/x/image v0.41.0
 	periph.io/x/conn/v3 v3.7.2
 	periph.io/x/devices/v3 v3.7.4
@@ -202,7 +202,7 @@ require (
 	go.uber.org/zap v1.28.0 // indirect
 	go.viam.com/api v0.1.603 // indirect
 	go.viam.com/test v1.2.5 // indirect
-	go.viam.com/utils v0.16.1 // indirect
+	go.viam.com/utils v0.16.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
